@@ -1,0 +1,21 @@
+# 環境変数（認証情報を含むため必ずignore）
+.env
+
+# データベース
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Playwright
+playwright-report/
+
+# OS
+.DS_Store
+Thumbs.db

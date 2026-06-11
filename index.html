@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>パチスロ台選びアシスタント (さいたま市)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #0f0f1a; color: #e0e0e0; }
+  header { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 16px 24px; border-bottom: 1px solid #2a2a4a; }
+  header h1 { font-size: 1.4rem; color: #7eb8f7; }
+  header p { font-size: 0.8rem; color: #888; margin-top: 2px; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: flex-end; }
+  .control-group { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 0.75rem; color: #888; }
+  select, input { background: #1e1e32; border: 1px solid #3a3a5a; color: #e0e0e0; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
+  button { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: bold; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary { background: #374151; color: #e0e0e0; }
+  .btn-secondary:hover { background: #4b5563; }
+  .btn-danger { background: #dc2626; color: #fff; }
+
+  .status-bar { background: #1e1e32; border: 1px solid #2a2a4a; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  .dot.running { background: #f59e0b; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .ranking-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .ranking-table th { background: #1e1e32; padding: 10px 14px; text-align: left; color: #7eb8f7; border-bottom: 1px solid #2a2a4a; position: sticky; top: 0; }
+  .ranking-table td { padding: 10px 14px; border-bottom: 1px solid #1e1e2e; }
+  .ranking-table tr:hover { background: #1a1a2e; cursor: pointer; }
+  .rank-1 td:first-child { color: #fbbf24; font-weight: bold; }
+  .rank-2 td:first-child { color: #d1d5db; font-weight: bold; }
+  .rank-3 td:first-child { color: #cd7f32; font-weight: bold; }
+
+  .score-bar { display: inline-block; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #3b82f6, #22c55e); vertical-align: middle; margin-right: 6px; }
+  .diff-positive { color: #22c55e; }
+  .diff-negative { color: #ef4444; }
+
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal.open { display: flex; }
+  .modal-box { background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 24px; width: 90%; max-width: 700px; }
+  .modal-title { font-size: 1.1rem; color: #7eb8f7; margin-bottom: 16px; }
+  .modal-close { float: right; background: none; border: none; color: #888; font-size: 1.2rem; cursor: pointer; }
+  canvas { max-height: 300px; }
+
+  .empty { text-align: center; color: #555; padding: 60px; }
+  .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #2a2a4a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎰 パチスロ台選びアシスタント</h1>
+  <p>さいたま市 — site777データ分析</p>
+</header>
+<div class="container">
+
+  <div class="controls">
+    <div class="control-group">
+      <label>ホール</label>
+      <select id="storeSelect"><option value="">全店舗</option></select>
+    </div>
+    <div class="control-group">
+      <label>機種名フィルタ</label>
+      <input id="machineFilter" placeholder="例: ジャグラー" style="width:160px">
+    </div>
+    <div class="control-group">
+      <label>集計日数</label>
+      <select id="daysSelect">
+        <option value="3">3日</option>
+        <option value="7" selected>7日</option>
+        <option value="14">14日</option>
+        <option value="30">30日</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>表示件数</label>
+      <select id="topSelect">
+        <option value="10">10件</option>
+        <option value="30" selected>30件</option>
+        <option value="50">50件</option>
+      </select>
+    </div>
+    <button class="btn-primary" onclick="loadRanking()">ランキング更新</button>
+    <button class="btn-secondary" onclick="openFetchModal()">データ取得</button>
+  </div>
+
+  <div class="status-bar">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusMsg">準備完了</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="ranking-table">
+      <thead>
+        <tr>
+          <th>順位</th><th>ホールID</th><th>機種名</th><th>台番号</th>
+          <th>スコア</th><th>差枚合計</th><th>日平均差枚</th>
+          <th>BB確率</th><th>RB確率</th><th>プラス日数</th>
+        </tr>
+      </thead>
+      <tbody id="rankingBody">
+        <tr><td colspan="10" class="empty">「ランキング更新」を押してください</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 履歴モーダル -->
+<div class="modal" id="historyModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title" id="modalTitle">台履歴</div>
+    <canvas id="historyChart"></canvas>
+  </div>
+</div>
+
+<!-- データ取得モーダル -->
+<div class="modal" id="fetchModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="document.getElementById('fetchModal').classList.remove('open')">✕</button>
+    <div class="modal-title">📥 データ取得</div>
+    <div style="margin-bottom:12px;font-size:0.85rem;color:#aaa;">
+      先に「ホール同期」で埼玉のホール一覧を取得してください。
+    </div>
+    <div class="controls" style="margin-bottom:16px;">
+      <div class="control-group">
+        <label>ホールID (カンマ区切り)</label>
+        <input id="fetchStoreIds" placeholder="例: 12345,67890" style="width:250px">
+      </div>
+      <div class="control-group">
+        <label>取得日数</label>
+        <select id="fetchDays">
+          <option value="3">3日</option>
+          <option value="7" selected>7日</option>
+          <option value="14">14日</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-secondary" onclick="syncStores()">ホール同期</button>
+      <button class="btn-primary" onclick="startFetch()">データ取得開始</button>
+    </div>
+    <div id="fetchResult" style="margin-top:12px;font-size:0.85rem;color:#aaa;"></div>
+  </div>
+</div>
+
+<script>
+let chartInstance = null;
+
+async function loadStores() {
+  const res = await fetch('/api/stores');
+  const stores = await res.json();
+  const sel = document.getElementById('storeSelect');
+  stores.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.site7_id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadRanking() {
+  const store = document.getElementById('storeSelect').value;
+  const machine = document.getElementById('machineFilter').value;
+  const days = document.getElementById('daysSelect').value;
+  const topN = document.getElementById('topSelect').value;
+
+  let url = `/api/ranking?days=${days}&top_n=${topN}`;
+  if (store) url += `&store_id=${store}`;
+  if (machine) url += `&machine_type=${encodeURIComponent(machine)}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+  const tbody = document.getElementById('rankingBody');
+
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty">データがありません。先にデータ取得を行ってください。</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.map(r => {
+    const diffClass = r.total_diff >= 0 ? 'diff-positive' : 'diff-negative';
+    const avgClass = r.avg_diff_per_day >= 0 ? 'diff-positive' : 'diff-negative';
+    const barW = Math.max(4, Math.min(80, r.score * 0.8));
+    return `<tr class="rank-${r.rank}" onclick="showHistory('${r.store_id}',${r.unit_number},'${r.machine_type.replace(/'/g,"\\'")}')">
+      <td>${r.rank}</td>
+      <td>${r.store_id}</td>
+      <td>${r.machine_type}</td>
+      <td>${r.unit_number}番</td>
+      <td><span class="score-bar" style="width:${barW}px"></span>${r.score}</td>
+      <td class="${diffClass}">${r.total_diff.toLocaleString()}</td>
+      <td class="${avgClass}">${r.avg_diff_per_day.toLocaleString()}</td>
+      <td>${r.bb_prob}</td>
+      <td>${r.rb_prob}</td>
+      <td>${r.plus_days}/${r.total_days}日</td>
+    </tr>`;
+  }).join('');
+}
+
+async function showHistory(storeId, unitNum, machineType) {
+  const days = document.getElementById('daysSelect').value;
+  const url = `/api/machine/history?store_id=${storeId}&unit_number=${unitNum}&machine_type=${encodeURIComponent(machineType)}&days=${days}`;
+  const res = await fetch(url);
+  const data = await res.json();
+
+  document.getElementById('modalTitle').textContent = `${machineType} ${unitNum}番台 — 差枚推移`;
+  document.getElementById('historyModal').classList.add('open');
+
+  const labels = data.map(d => d.date);
+  const diffs = data.map(d => d.diff_medals);
+
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(document.getElementById('historyChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '差枚数',
+        data: diffs,
+        backgroundColor: diffs.map(v => v >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)'),
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#888' }, grid: { color: '#2a2a4a' } },
+        y: { ticks: { color: '#888' }, grid: { color: '#2a2a4a' } }
+      }
+    }
+  });
+}
+
+function closeModal() {
+  document.getElementById('historyModal').classList.remove('open');
+}
+
+function openFetchModal() {
+  document.getElementById('fetchModal').classList.add('open');
+}
+
+async function syncStores() {
+  document.getElementById('fetchResult').textContent = '同期中...';
+  const res = await fetch('/api/stores/sync', { method: 'POST' });
+  const d = await res.json();
+  document.getElementById('fetchResult').textContent = `${d.synced}件のホールを同期しました`;
+  await loadStores();
+}
+
+async function startFetch() {
+  const ids = document.getElementById('fetchStoreIds').value.split(',').map(s => s.trim()).filter(Boolean);
+  const days = document.getElementById('fetchDays').value;
+  if (!ids.length) { alert('ホールIDを入力してください'); return; }
+
+  const res = await fetch('/api/data/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ids),
+  });
+  if (!res.ok) { alert('取得中です。完了をお待ちください。'); return; }
+  document.getElementById('fetchResult').textContent = 'バックグラウンドで取得中...';
+  pollStatus();
+}
+
+async function pollStatus() {
+  const res = await fetch('/api/data/status');
+  const d = await res.json();
+  const dot = document.getElementById('statusDot');
+  document.getElementById('statusMsg').textContent = d.message || '待機中';
+  if (d.running) {
+    dot.classList.add('running');
+    setTimeout(pollStatus, 3000);
+  } else {
+    dot.classList.remove('running');
+  }
+}
+
+loadStores();
+pollStatus();
+setInterval(pollStatus, 10000);
+</script>
+</body>
+</html>
